@@ -2,7 +2,14 @@ import logging
 import structlog
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(level: str | None = None) -> None:
+    if level is None:
+        try:
+            from src.config import settings
+            level = "DEBUG" if settings.debug else "INFO"
+        except Exception:
+            level = "INFO"
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,

@@ -2,14 +2,16 @@ from agno.agent import Agent
 
 from src.config import settings
 from src.tools.fazendas import (
-    buscar_por_municipio,
+    buscar_maiores_fazendas,
     buscar_por_area,
+    buscar_por_municipio,
+    buscar_por_raio,
     buscar_por_status,
-    localizar_por_coordenada,
+    contar_por_area,
+    contar_por_municipio,
     detalhes_da_fazenda,
     estatisticas_municipio,
-    contar_por_municipio,
-    buscar_por_raio
+    localizar_por_coordenada,
 )
 
 SYSTEM_PROMPT = """
@@ -33,11 +35,13 @@ Regras:
 _TOOLS = [
     buscar_por_municipio,
     buscar_por_area,
+    buscar_maiores_fazendas,
     buscar_por_status,
     localizar_por_coordenada,
     detalhes_da_fazenda,
     estatisticas_municipio,
     contar_por_municipio,
+    contar_por_area,
     buscar_por_raio,
 ]
 
@@ -45,27 +49,24 @@ _TOOLS = [
 def _build_model():
     if settings.openai_api_key:
         from agno.models.openai import OpenAIChat
-        model_id = settings.agent_model or "gpt-4o-mini"
         return OpenAIChat(
-            id=model_id,
+            id=settings.agent_model or "gpt-4o-mini",
             api_key=settings.openai_api_key,
             max_tokens=settings.agent_max_tokens,
         )
 
     if settings.anthropic_api_key:
         from agno.models.anthropic import Claude
-        model_id = settings.agent_model or "claude-haiku-4-5-20251001"
         return Claude(
-            id=model_id,
+            id=settings.agent_model or "claude-haiku-4-5-20251001",
             api_key=settings.anthropic_api_key,
             max_tokens=settings.agent_max_tokens,
         )
 
     if settings.google_api_key:
         from agno.models.google import Gemini
-        model_id = settings.agent_model or "gemini-2.0-flash"
         return Gemini(
-            id=model_id,
+            id=settings.agent_model or "gemini-2.0-flash",
             api_key=settings.google_api_key,
         )
 

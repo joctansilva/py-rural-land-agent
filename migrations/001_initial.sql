@@ -1,6 +1,7 @@
 -- Habilita a extensão PostGIS (necessário uma vez por banco)
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS postgis_topology;
+CREATE EXTENSION IF NOT EXISTS unaccent;
 
 -- Tabela principal de fazendas
 CREATE TABLE IF NOT EXISTS fazendas (

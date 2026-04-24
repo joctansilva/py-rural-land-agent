@@ -2,25 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
-import psycopg
-import psycopg.rows
 import structlog
 
-from src.config import settings
+from src.database import get_connection
 
 logger = structlog.get_logger(__name__)
 
-# Campos essenciais retornados ao LLM — payload enxuto
 _FIELDS_LIST = "cod_imovel, nome_fazenda, municipio, uf, area_ha, status, tipo_imovel"
 _FIELDS_DETAIL = (
     "cod_imovel, nome_fazenda, municipio, uf, area_ha, status, "
     "modulos_fiscais, tipo_imovel, "
     "ROUND((ST_Area(geom::geography) / 10000)::numeric, 2) AS area_calculada_ha"
 )
-
-
-def _conn() -> psycopg.Connection:
-    return psycopg.connect(settings.database_url, row_factory=psycopg.rows.dict_row)
 
 
 def buscar_por_municipio(municipio: str, uf: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -36,13 +29,12 @@ def buscar_por_municipio(municipio: str, uf: str, limit: int = 20) -> list[dict[
     sql = f"""
         SELECT {_FIELDS_LIST}
         FROM fazendas
-        WHERE municipio ILIKE %s AND uf = UPPER(%s)
+        WHERE unaccent(municipio) ILIKE unaccent(%s) AND uf = UPPER(%s)
         ORDER BY area_ha DESC NULLS LAST
         LIMIT %s
     """
-    with _conn() as conn:
-        cur = conn.execute(sql, (f"%{municipio}%", uf, limit))
-        rows = cur.fetchall()
+    with get_connection() as conn:
+        rows = conn.execute(sql, (f"%{municipio}%", uf, limit)).fetchall()
 
     logger.info("buscar_por_municipio", municipio=municipio, uf=uf, found=len(rows))
     return rows
@@ -80,9 +72,8 @@ def buscar_por_area(
         ORDER BY area_ha DESC NULLS LAST
         LIMIT %s
     """
-    with _conn() as conn:
-        cur = conn.execute(sql, params)
-        rows = cur.fetchall()
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
 
     logger.info("buscar_por_area", min=area_min_ha, max=area_max_ha, uf=uf, found=len(rows))
     return rows
@@ -111,7 +102,7 @@ def buscar_por_status(
         filters.append("uf = UPPER(%s)")
         params.append(uf)
     if municipio:
-        filters.append("municipio ILIKE %s")
+        filters.append("unaccent(municipio) ILIKE unaccent(%s)")
         params.append(f"%{municipio}%")
 
     params.append(limit)
@@ -123,9 +114,8 @@ def buscar_por_status(
         ORDER BY area_ha DESC NULLS LAST
         LIMIT %s
     """
-    with _conn() as conn:
-        cur = conn.execute(sql, params)
-        rows = cur.fetchall()
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
 
     logger.info("buscar_por_status", status=status, uf=uf, municipio=municipio, found=len(rows))
     return rows
@@ -145,19 +135,89 @@ def localizar_por_coordenada(lat: float, lng: float) -> dict[str, Any] | None:
         WHERE ST_Contains(geom, ST_SetSRID(ST_MakePoint(%s, %s), 4674))
         LIMIT 1
     """
-    with _conn() as conn:
-        cur = conn.execute(sql, (lng, lat))  # PostGIS usa (lon, lat)
-        row = cur.fetchone()
+    with get_connection() as conn:
+        row = conn.execute(sql, (lng, lat)).fetchone()  # PostGIS usa (lon, lat)
 
-    if row:
-        logger.info("localizar_por_coordenada", lat=lat, lng=lng, found=row["cod_imovel"])
-    else:
-        logger.info("localizar_por_coordenada", lat=lat, lng=lng, found=None)
-
+    logger.info("localizar_por_coordenada", lat=lat, lng=lng, found=row["cod_imovel"] if row else None)
     return row
 
 
-# ── Tools bônus ────────────────────────────────────────────────────────────────
+def buscar_maiores_fazendas(
+    uf: str | None = None,
+    status: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """
+    Retorna as fazendas com maior área, ordenadas da maior para a menor.
+    Use esta tool para perguntas como "qual a maior fazenda do RS?",
+    "top 10 maiores fazendas ativas", "maior fazenda cancelada do MT", etc.
+
+    Args:
+        uf: Filtro opcional por estado (ex: RS, MT, GO)
+        status: Filtro opcional — ativo | pendente | cancelado | suspenso
+        limit: Número de resultados (padrão 10, máx 50)
+    """
+    limit = min(limit, 50)
+    params: list[Any] = []
+    filters: list[str] = []
+
+    if uf:
+        filters.append("uf = UPPER(%s)")
+        params.append(uf)
+    if status:
+        filters.append("status = %s")
+        params.append(status.lower())
+
+    where = f"WHERE {' AND '.join(filters)}" if filters else ""
+    params.append(limit)
+
+    sql = f"""
+        SELECT {_FIELDS_LIST}
+        FROM fazendas
+        {where}
+        ORDER BY area_ha DESC NULLS LAST
+        LIMIT %s
+    """
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    logger.info("buscar_maiores_fazendas", uf=uf, status=status, found=len(rows))
+    return rows
+
+
+def contar_por_area(
+    area_min_ha: float,
+    area_max_ha: float = 999_999_999.0,
+    uf: str | None = None,
+) -> dict[str, Any]:
+    """
+    Conta o total de fazendas dentro de um intervalo de área em hectares.
+    Use esta tool para perguntas do tipo "quantas fazendas têm mais de X hectares".
+
+    Args:
+        area_min_ha: Área mínima em hectares
+        area_max_ha: Área máxima em hectares (padrão: sem limite superior)
+        uf: Filtro opcional por estado
+    """
+    params: list[Any] = [area_min_ha, area_max_ha]
+    uf_filter = ""
+    if uf:
+        uf_filter = "AND uf = UPPER(%s)"
+        params.append(uf)
+
+    sql = f"""
+        SELECT COUNT(*) AS total
+        FROM fazendas
+        WHERE area_ha BETWEEN %s AND %s
+        {uf_filter}
+    """
+    with get_connection() as conn:
+        row = conn.execute(sql, params).fetchone()
+
+    total = row["total"] if row else 0
+    logger.info("contar_por_area", min=area_min_ha, max=area_max_ha, uf=uf, total=total)
+    return {"total": total, "area_min_ha": area_min_ha, "area_max_ha": area_max_ha, "uf": uf}
+
 
 def detalhes_da_fazenda(cod_imovel: str) -> dict[str, Any] | None:
     """
@@ -166,14 +226,9 @@ def detalhes_da_fazenda(cod_imovel: str) -> dict[str, Any] | None:
     Args:
         cod_imovel: Código do imóvel (CAR)
     """
-    sql = f"""
-        SELECT {_FIELDS_DETAIL}
-        FROM fazendas
-        WHERE cod_imovel = %s
-    """
-    with _conn() as conn:
-        cur = conn.execute(sql, (cod_imovel,))
-        row = cur.fetchone()
+    sql = f"SELECT {_FIELDS_DETAIL} FROM fazendas WHERE cod_imovel = %s"
+    with get_connection() as conn:
+        row = conn.execute(sql, (cod_imovel,)).fetchone()
 
     logger.info("detalhes_da_fazenda", cod_imovel=cod_imovel, found=bool(row))
     return row
@@ -191,19 +246,18 @@ def estatisticas_municipio(municipio: str, uf: str) -> dict[str, Any] | None:
         SELECT
             municipio,
             uf,
-            COUNT(*)                          AS total_fazendas,
-            ROUND(SUM(area_ha)::NUMERIC, 2)   AS area_total_ha,
+            COUNT(*)                              AS total_fazendas,
+            ROUND(SUM(area_ha)::NUMERIC, 2)       AS area_total_ha,
             COUNT(*) FILTER (WHERE status = 'ativo')     AS ativas,
             COUNT(*) FILTER (WHERE status = 'pendente')  AS pendentes,
             COUNT(*) FILTER (WHERE status = 'cancelado') AS canceladas,
             COUNT(*) FILTER (WHERE status = 'suspenso')  AS suspensas
         FROM fazendas
-        WHERE municipio ILIKE %s AND uf = UPPER(%s)
+        WHERE unaccent(municipio) ILIKE unaccent(%s) AND uf = UPPER(%s)
         GROUP BY municipio, uf
     """
-    with _conn() as conn:
-        cur = conn.execute(sql, (f"%{municipio}%", uf))
-        row = cur.fetchone()
+    with get_connection() as conn:
+        row = conn.execute(sql, (f"%{municipio}%", uf)).fetchone()
 
     logger.info("estatisticas_municipio", municipio=municipio, uf=uf, found=bool(row))
     return row
@@ -224,21 +278,18 @@ def contar_por_municipio(municipio: str, uf: str | None = None) -> dict[str, Any
         params.append(uf)
 
     sql = f"""
-        SELECT
-            municipio,
-            uf,
-            COUNT(*) AS total
+        SELECT municipio, uf, COUNT(*) AS total
         FROM fazendas
-        WHERE municipio ILIKE %s {uf_filter}
+        WHERE unaccent(municipio) ILIKE unaccent(%s) {uf_filter}
         GROUP BY municipio, uf
         ORDER BY total DESC
     """
-    with _conn() as conn:
-        cur = conn.execute(sql, params)
-        rows = cur.fetchall()
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
 
     logger.info("contar_por_municipio", municipio=municipio, uf=uf, found=len(rows))
     return {"resultados": rows, "total_municipios_encontrados": len(rows)}
+
 
 def buscar_por_raio(
     lat: float,
@@ -279,9 +330,8 @@ def buscar_por_raio(
     # PostGIS usa (longitude, latitude)
     params = (lng, lat, lng, lat, raio_metros, limit)
 
-    with _conn() as conn:
-        cur = conn.execute(sql, params)
-        rows = cur.fetchall()
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
 
     logger.info("buscar_por_raio", lat=lat, lng=lng, raio_km=raio_km, found=len(rows))
     return rows
