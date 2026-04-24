@@ -1,0 +1,28 @@
+from src.logging_config import configure_logging
+configure_logging()
+
+import typer
+from pathlib import Path
+import structlog
+
+from src.ingestion.pipeline import ingest
+
+app = typer.Typer()
+log = structlog.get_logger()
+
+
+@app.command()
+def main(
+    file: Path = typer.Argument(..., help="Caminho para o shapefile ou GeoJSON"),
+    batch_size: int = typer.Option(10_000, help="Tamanho do lote para log de progresso"),
+) -> None:
+    if not file.exists():
+        typer.echo(f"Arquivo não encontrado: {file}", err=True)
+        raise typer.Exit(1)
+
+    log.info("ingestion_started", file=str(file))
+    ingest(file, batch_size=batch_size)
+
+
+if __name__ == "__main__":
+    app()

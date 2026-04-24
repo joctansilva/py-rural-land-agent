@@ -1,0 +1,21 @@
+# Ambiente virtual
+.venv/
+
+# Dados (não commitar shapefile — são grandes e privados)
+data/
+docs/
+
+# Variáveis de ambiente (contém segredos)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp

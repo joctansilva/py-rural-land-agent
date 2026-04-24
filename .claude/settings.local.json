@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(.venv/Scripts/python -c ' *)",
+      "Bash(.venv/Scripts/python -c \"import agno; print\\(agno.__version__\\)\")",
+      "Bash(.venv/Scripts/python -c \"import inspect; from agno.agent import Agent; print\\(inspect.signature\\(Agent.__init__\\)\\)\")",
+      "Bash(docker exec fazendas_db *)",
+      "Bash(python -m pytest tests/unit/ -v)",
+      "Bash(uv sync *)"
+    ]
+  }
+}
