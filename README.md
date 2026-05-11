@@ -1,6 +1,8 @@
-# DadosFazenda — Desafio Técnico
+# Agente Geoespacial de Imóveis Rurais
 
-Agente de consulta geoespacial para imóveis rurais do Brasil com PostgreSQL/PostGIS e Agno.
+Sistema de consulta geoespacial de imóveis rurais do Brasil (CAR/SIGEF) com PostgreSQL/PostGIS e agente tool-based via Agno.
+
+Construído como estudo prático de modelagem PostGIS + agentes de IA: o agente recebe perguntas em português natural e decide quais ferramentas SQL chamar para responder — sem stuffar dados no prompt.
 
 ## Stack
 
@@ -84,9 +86,25 @@ source .venv/Scripts/activate
 source .venv/bin/activate
 ```
 
-### 5. Ingestão dos dados
+### 5. Baixe o dataset
 
-Coloque o shapefile na pasta `data/` e execute:
+Os dados são do **SICAR (Sistema Nacional de Cadastro Ambiental Rural)**, disponibilizados publicamente pelo governo federal.
+
+**Fonte oficial:** [https://www.car.gov.br/publico/municipios/downloads](https://www.car.gov.br/publico/municipios/downloads)
+
+Selecione o estado desejado (ex.: RS, MT, GO), baixe o shapefile de imóveis e coloque na pasta `data/`:
+
+```
+data/
+└── AREA_IMOVEL_1.shp   ← shapefile do CAR
+    AREA_IMOVEL_1.dbf
+    AREA_IMOVEL_1.prj
+    AREA_IMOVEL_1.shx
+```
+
+> A pasta `data/` está no `.gitignore`. Os arquivos `.shp` chegam a centenas de MB.
+
+### 6. Ingestão dos dados
 
 ```bash
 python -m src.ingestion data/AREA_IMOVEL_1.shp
@@ -100,7 +118,7 @@ ingestion_complete total=657027 elapsed_s=... rows_per_sec=...
 
 > A ingestão usa `COPY` em lote e leva em torno de 2–5 minutos dependendo do hardware.
 
-### 6. Rode o demo (8 perguntas de exemplo)
+### 7. Rode o demo (8 perguntas de exemplo)
 
 Primeiro, obtenha um `cod_imovel` real do dataset:
 
@@ -117,7 +135,7 @@ python demo.py --cod-imovel "RS-XXXXXXXX-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 
 Saída esperada: respostas para 8 perguntas geoespaciais, cada uma em menos de 30 s.
 
-### 7. API REST (opcional)
+### 8. API REST (opcional)
 
 ```bash
 uvicorn src.api.routes:app --host 0.0.0.0 --port 8000 --reload
@@ -141,7 +159,7 @@ curl -X POST http://localhost:8000/chat/stream \
   -d '{"pergunta": "Liste as 5 maiores fazendas ativas no RS."}'
 ```
 
-### 8. Testes
+### 9. Testes
 
 ```bash
 # Unitários — sem banco, rápidos

@@ -1,7 +1,7 @@
 # Ambiente virtual
 .venv/
 
-# Dados (não commitar shapefile — são grandes e privados)
+# Dados (não commitar shapefile, arquivos grandes, baixe do SICAR)
 data/
 docs/
 
